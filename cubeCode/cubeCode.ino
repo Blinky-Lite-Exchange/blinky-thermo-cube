@@ -89,10 +89,10 @@ void loop()
     mAX31855_A.temp = getMAX31855Temperature(mAX31855_A.chipSelectPin, spiSettings);
     mAX31855_B.temp = getMAX31855Temperature(mAX31855_B.chipSelectPin, spiSettings);
 
-    bb.i16_mAX31855_A = (int16_t) (mAX31855_A.temp * 100.0);
-    bb.i16_mAX31855_B = (int16_t) (mAX31855_B.temp * 100.0);
-    bb.i16_dS18B20_A  = (int16_t) (dS18B20_A.temp * 100.0);
-    bb.i16_dS18B20_B  = (int16_t) (dS18B20_B.temp * 100.0);
+    bb.i16_mAX31855_A = (int16_t) (mAX31855_A.temp * 10.0);
+    bb.i16_mAX31855_B = (int16_t) (mAX31855_B.temp * 10.0);
+    bb.i16_dS18B20_A  = (int16_t) (dS18B20_A.temp * 10.0);
+    bb.i16_dS18B20_B  = (int16_t) (dS18B20_B.temp * 10.0);
   }
   blinkyBus.poll();
 }
