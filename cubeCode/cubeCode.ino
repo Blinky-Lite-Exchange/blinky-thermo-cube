@@ -1,20 +1,25 @@
+#include "BlinkyBus.h"
 #include <OneWire.h>
 #include <SPI.h> 
-#define BAUD_RATE 57600
-#define CHECKSUM 64
+#define BAUD_RATE  19200
+#define commLEDPin    15
+#define measurementInterval   2000
 
-struct TransmitData
+#define BLINKYBUSBUFSIZE  5
+union BlinkyBusUnion
 {
-  float mAX31855_A = 0;
-  float mAX31855_B = 0;
-  float dS18B20_A = 0;
-  float dS18B20_B = 0;
-  byte extraInfo[36];
-};
-struct ReceiveData
-{
-  byte extraInfo[56];
-};
+  struct
+  {
+    int16_t state;
+    int16_t i16_mAX31855_A;
+    int16_t i16_mAX31855_B;
+    int16_t i16_dS18B20_A;
+    int16_t i16_dS18B20_B;
+  };
+  int16_t buffer[BLINKYBUSBUFSIZE];
+} bb;
+BlinkyBus blinkyBus(bb.buffer, BLINKYBUSBUFSIZE, Serial1, commLEDPin);
+
 struct DS18B20
 {
   int signalPin;
@@ -36,8 +41,10 @@ DS18B20 dS18B20_B;
 MAX31855 mAX31855_A;
 MAX31855 mAX31855_B;
 SPISettings spiSettings;
+unsigned long now;
+unsigned long lastMeasurement = 0;
 
-void setupPins(TransmitData* tData, ReceiveData* rData)
+void setup() 
 {
   dS18B20_A.signalPin = 3;
   dS18B20_A.powerPin = 2;
@@ -61,30 +68,61 @@ void setupPins(TransmitData* tData, ReceiveData* rData)
   pinMode (mAX31855_B.chipSelectPin, OUTPUT);
   digitalWrite(mAX31855_B.chipSelectPin,HIGH);
 
-  int sizeOfextraInfo = sizeof(tData->extraInfo);
-  for (int ii = 0; ii < sizeOfextraInfo; ++ii) tData->extraInfo[ii] = 0;
-
   spiSettings = SPISettings(2000000, MSBFIRST, SPI_MODE1);
   SPI.begin();
-}
-void processNewSetting(TransmitData* tData, ReceiveData* rData, ReceiveData* newData)
-{
-}
-boolean processData(TransmitData* tData, ReceiveData* rData)
-{
-  
-  dS18B20_A.temp = getDS18B20Temperature(&dS18B20_A.oneWire, dS18B20_A.address, dS18B20_A.chipType);
-  dS18B20_B.temp = getDS18B20Temperature(&dS18B20_B.oneWire, dS18B20_B.address, dS18B20_B.chipType);
 
-  mAX31855_A.temp = getMAX31855Temperature(mAX31855_A.chipSelectPin, spiSettings);
-  mAX31855_B.temp = getMAX31855Temperature(mAX31855_B.chipSelectPin, spiSettings);
+  Serial1.begin(BAUD_RATE);
+  bb.state = 1; //init
+  blinkyBus.start();
+  lastMeasurement = millis(); 
+}
 
-  tData->dS18B20_A = dS18B20_A.temp;
-  tData->dS18B20_B = dS18B20_B.temp;
-  tData->mAX31855_A = mAX31855_A.temp;
-  tData->mAX31855_B = mAX31855_B.temp;
-  delay(2000);
-  return true;
+void loop() 
+{
+  now = millis();
+  if ((now - lastMeasurement) > measurementInterval)
+  {
+    lastMeasurement = now;
+    dS18B20_A.temp = getDS18B20Temperature(&dS18B20_A.oneWire, dS18B20_A.address, dS18B20_A.chipType);
+    dS18B20_B.temp = getDS18B20Temperature(&dS18B20_B.oneWire, dS18B20_B.address, dS18B20_B.chipType);
+
+    mAX31855_A.temp = getMAX31855Temperature(mAX31855_A.chipSelectPin, spiSettings);
+    mAX31855_B.temp = getMAX31855Temperature(mAX31855_B.chipSelectPin, spiSettings);
+
+    bb.i16_mAX31855_A = (int16_t) (mAX31855_A.temp * 100.0);
+    bb.i16_mAX31855_B = (int16_t) (mAX31855_B.temp * 100.0);
+    bb.i16_dS18B20_A  = (int16_t) (dS18B20_A.temp * 100.0);
+    bb.i16_dS18B20_B  = (int16_t) (dS18B20_B.temp * 100.0);
+  }
+  blinkyBus.poll();
+}
+
+byte initDS18B20(byte* addr, OneWire* ow)
+{
+  byte type_s = 0;
+  if ( !ow->search(addr)) 
+  {
+    ow->reset_search();
+    delay(250);
+    return 0;
+  }
+   
+  // the first ROM byte indicates which chip
+  switch (addr[0]) 
+  {
+    case 0x10:
+      type_s = 1;
+      break;
+    case 0x28:
+      type_s = 0;
+      break;
+    case 0x22:
+      type_s = 0;
+      break;
+    default:
+      return 0;
+  } 
+  return type_s;
 }
 float getDS18B20Temperature(OneWire* ow, byte* addr, byte chipType)
 {
@@ -118,34 +156,6 @@ float getDS18B20Temperature(OneWire* ow, byte* addr, byte chipType)
   celsius = (float)raw / 16.0;
   return celsius;
   
-}
-
-byte initDS18B20(byte* addr, OneWire* ow)
-{
-  byte type_s = 0;
-  if ( !ow->search(addr)) 
-  {
-    ow->reset_search();
-    delay(250);
-    return 0;
-  }
-   
-  // the first ROM byte indicates which chip
-  switch (addr[0]) 
-  {
-    case 0x10:
-      type_s = 1;
-      break;
-    case 0x28:
-      type_s = 0;
-      break;
-    case 0x22:
-      type_s = 0;
-      break;
-    default:
-      return 0;
-  } 
-  return type_s;
 }
 float getMAX31855Temperature(int chipSelect, SPISettings spiSetup)
 {
@@ -181,89 +191,4 @@ float getMAX31855Temperature(int chipSelect, SPISettings spiSetup)
   }
   fTemp = ((float) iTemp) * 0.25;
   return fTemp;
-}
-
-const int commLEDPin = 15;
-boolean commLED = true;
-
-struct TXinfo
-{
-  int cubeInit = 1;
-  int newSettingDone = 0;
-  int checkSum = CHECKSUM;
-};
-struct RXinfo
-{
-  int newSetting = 0;
-  int checkSum = CHECKSUM;
-};
-
-struct TX
-{
-  TXinfo txInfo;
-  TransmitData txData;
-};
-struct RX
-{
-  RXinfo rxInfo;
-  ReceiveData rxData;
-};
-TX tx;
-RX rx;
-ReceiveData settingsStorage;
-
-int sizeOfTx = 0;
-int sizeOfRx = 0;
-
-void setup()
-{
-  setupPins(&(tx.txData), &settingsStorage);
-  pinMode(commLEDPin, OUTPUT);  
-  digitalWrite(commLEDPin, commLED);
-
-  sizeOfTx = sizeof(tx);
-  sizeOfRx = sizeof(rx);
-  Serial1.begin(BAUD_RATE);
-  delay(1000);
-}
-void loop()
-{
-  boolean goodData = false;
-  goodData = processData(&(tx.txData), &settingsStorage);
-  if (goodData)
-  {
-    tx.txInfo.newSettingDone = 0;
-    if(Serial1.available() > 0)
-    { 
-      commLED = !commLED;
-      digitalWrite(commLEDPin, commLED);
-      Serial1.readBytes((uint8_t*)&rx, sizeOfRx);
-      
-      if (rx.rxInfo.checkSum == CHECKSUM)
-      {
-        if (rx.rxInfo.newSetting > 0)
-        {
-          processNewSetting(&(tx.txData), &settingsStorage, &(rx.rxData));
-          tx.txInfo.newSettingDone = 1;
-          tx.txInfo.cubeInit = 0;
-        }
-      }
-      else
-      {
-        Serial1.end();
-        for (int ii = 0; ii < 50; ++ii)
-        {
-          commLED = !commLED;
-          digitalWrite(commLEDPin, commLED);
-          delay(100);
-        }
-
-        Serial1.begin(BAUD_RATE);
-        tx.txInfo.newSettingDone = 0;
-        tx.txInfo.cubeInit = -1;
-      }
-    }
-    Serial1.write((uint8_t*)&tx, sizeOfTx);
-    Serial1.flush();
-  }
 }
